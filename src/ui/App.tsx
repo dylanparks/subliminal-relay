@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FolderExport } from './components/FolderExport';
+import { ZipExport } from './components/ZipExport';
 import { PluginToUIMessage, ScanResult } from '../types';
 import './styles/global.css';
 import './styles/App.css';
@@ -45,7 +45,7 @@ export default function App() {
 
       <main className="app-content">
         {error && <div className="error-banner">{error}</div>}
-        <FolderExport result={scanResult} scanning={scanning} onScan={handleScan} />
+        <ZipExport result={scanResult} scanning={scanning} onScan={handleScan} />
       </main>
     </div>
   );
