@@ -1,0 +1,36 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg: #0e0e0e;
+  --color-surface: #1a1a1a;
+  --color-surface-raised: #242424;
+  --color-border: #2e2e2e;
+  --color-text: #f0f0f0;
+  --color-text-muted: #888;
+  --color-accent: #6c63ff;
+  --color-accent-hover: #8078ff;
+  --color-success: #22c55e;
+  --color-error: #ef4444;
+
+  --radius: 8px;
+  --radius-sm: 4px;
+  --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', monospace;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
