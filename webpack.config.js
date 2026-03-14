@@ -1,4 +1,5 @@
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const HtmlInlineScriptPlugin = require('html-inline-script-webpack-plugin');
 const path = require('path');
 
 module.exports = (env, argv) => ({
@@ -39,9 +40,9 @@ module.exports = (env, argv) => ({
       template: './src/ui/index.html',
       filename: 'ui.html',
       chunks: ['ui'],
-      // Inline all JS/CSS into a single HTML file (required by Figma)
       inject: 'body',
-      inlineSource: '.(js|css)$',
     }),
+    // Inline all JS into the HTML file — required by Figma (single-file UI)
+    new HtmlInlineScriptPlugin(),
   ],
 });

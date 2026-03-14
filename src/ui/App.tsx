@@ -1,31 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { GitHubExport } from './components/GitHubExport';
-import { ManualExport } from './components/ManualExport';
-import { PluginToUIMessage, SubliminalTokenExport } from '../types';
+import { ZipExport } from './components/ZipExport';
+import { PluginToUIMessage, ScanResult } from '../types';
+import './styles/global.css';
 import './styles/App.css';
 
-type Tab = 'github' | 'manual';
-
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('github');
-  const [tokens, setTokens] = useState<SubliminalTokenExport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Listen for messages from the Figma sandbox
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       const msg = event.data.pluginMessage as PluginToUIMessage;
       if (!msg) return;
 
       switch (msg.type) {
-        case 'TOKENS_EXTRACTED':
-          setTokens(msg.payload);
-          setLoading(false);
+        case 'SCAN_COMPLETE':
+          setScanResult(msg.payload);
+          setScanning(false);
           break;
         case 'EXPORT_ERROR':
           setError(msg.message);
-          setLoading(false);
+          setScanning(false);
           break;
       }
     };
@@ -34,51 +30,22 @@ export default function App() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  const handleExtract = () => {
+  const handleScan = () => {
     setError(null);
-    setLoading(true);
-    parent.postMessage({ pluginMessage: { type: 'EXTRACT_TOKENS' } }, '*');
+    setScanning(true);
+    parent.postMessage({ pluginMessage: { type: 'SCAN_COLLECTIONS' } }, '*');
   };
 
   return (
     <div className="app">
       <header className="app-header">
         <span className="app-logo">Subliminal Relay</span>
+        <span className="app-subtitle">Variable Exporter</span>
       </header>
-
-      <div className="tab-bar">
-        <button
-          className={`tab-btn${activeTab === 'github' ? ' active' : ''}`}
-          onClick={() => setActiveTab('github')}
-        >
-          GitHub Export
-        </button>
-        <button
-          className={`tab-btn${activeTab === 'manual' ? ' active' : ''}`}
-          onClick={() => setActiveTab('manual')}
-        >
-          Manual Export
-        </button>
-      </div>
 
       <main className="app-content">
         {error && <div className="error-banner">{error}</div>}
-
-        {activeTab === 'github' && (
-          <GitHubExport
-            tokens={tokens}
-            loading={loading}
-            onExtract={handleExtract}
-          />
-        )}
-
-        {activeTab === 'manual' && (
-          <ManualExport
-            tokens={tokens}
-            loading={loading}
-            onExtract={handleExtract}
-          />
-        )}
+        <ZipExport result={scanResult} scanning={scanning} onScan={handleScan} />
       </main>
     </div>
   );

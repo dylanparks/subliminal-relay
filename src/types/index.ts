@@ -12,38 +12,40 @@ export interface TokenCollection {
   [groupOrName: string]: DesignToken | TokenCollection;
 }
 
-// ─── Exported Payload ───────────────────────────────────────────────────────
+// ─── Per-Collection Export ───────────────────────────────────────────────────
 
-export interface SubliminalTokenExport {
-  meta: {
-    exportedAt: string;
-    pluginVersion: string;
-    figmaFileName: string;
-  };
-  variables: TokenCollection;
-  styles: {
-    colors: TokenCollection;
-    text: TokenCollection;
-    effects: TokenCollection;
-  };
+export interface CollectionFile {
+  /** The exact Figma collection name (e.g. "Global Colors") */
+  collectionName: string;
+  /** The output filename in the ZIP (e.g. "global-colors.json", "intent-colors-dark.json") */
+  fileName: string;
+  /** Number of variables resolved from this collection mode */
+  tokenCount: number;
+  /** Nested token tree */
+  tokens: TokenCollection;
+  /**
+   * The Figma mode name this file represents (e.g. "Lightmode", "Darkmode", "LG").
+   * Omitted for single-mode collections.
+   */
+  modeName?: string;
 }
 
-// ─── GitHub Config ──────────────────────────────────────────────────────────
-
-export interface GitHubConfig {
-  token: string;
-  owner: string;
-  repo: string;
-  branch: string;
-  filePath: string;
+export interface ScanResult {
+  exportedAt: string;
+  pluginVersion: string;
+  figmaFileName: string;
+  /** Collections that were found and scanned */
+  collections: CollectionFile[];
+  /** Target collection names not found in the file */
+  missing: string[];
 }
 
 // ─── Plugin Messages ─────────────────────────────────────────────────────────
 
 export type PluginToUIMessage =
-  | { type: 'TOKENS_EXTRACTED'; payload: SubliminalTokenExport }
+  | { type: 'SCAN_COMPLETE'; payload: ScanResult }
   | { type: 'EXPORT_ERROR'; message: string };
 
 export type UIToPluginMessage =
-  | { type: 'EXTRACT_TOKENS' }
+  | { type: 'SCAN_COLLECTIONS' }
   | { type: 'CLOSE_PLUGIN' };
