@@ -7,7 +7,7 @@ const TARGET_COLLECTIONS = [
   'Intent Colors',
   'Typography',
   'Shape',
-  'Breakpoint',
+  'Viewport',
 ];
 
 interface Props {

@@ -30,7 +30,7 @@ const TARGET_COLLECTIONS = [
   'Intent Colors',
   'Typography',
   'Shape',
-  'Breakpoint',
+  'Viewport',
 ] as const;
 
 // ─── Plugin Initialization ───────────────────────────────────────────────────
@@ -117,7 +117,7 @@ async function scanAndSend(): Promise<void> {
 
         collections.push({
           collectionName: targetName,
-          fileName: toFileNameForMode(targetName, modeId, collection.defaultModeId, modeName),
+          fileName: toFileNameForMode(targetName, modeName, isMultiMode),
           tokenCount,
           tokens,
           modeName: isMultiMode ? modeName : undefined,
@@ -154,12 +154,11 @@ function toFileName(collectionName: string): string {
  */
 function toFileNameForMode(
   collectionName: string,
-  modeId: string,
-  defaultModeId: string,
   modeName: string,
+  isMultiMode: boolean,
 ): string {
   const base = collectionName.toLowerCase().replace(/\s+/g, '-');
-  if (modeId === defaultModeId) return `${base}.json`;
+  if (!isMultiMode) return `${base}.json`;
   const suffix = modeName
     .toLowerCase()
     .replace(/mode$/i, '')       // "Darkmode" → "dark", "Lightmode" → "light"
@@ -167,7 +166,7 @@ function toFileNameForMode(
     .replace(/[^a-z0-9-]/g, '')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-  return `${base}-${suffix}.json`;
+  return suffix ? `${base}-${suffix}.json` : `${base}.json`;
 }
 
 /**
