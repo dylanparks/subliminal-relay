@@ -156,6 +156,21 @@
   margin-left: auto;
 }
 
+.success-banner {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--color-success);
+  font-size: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.success-banner code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .collection-missing-label {
   font-size: 11px;
   color: var(--color-error);
