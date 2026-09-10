@@ -99,6 +99,13 @@ export interface DiagnosticReport {
     variableCount: number;
     isRemote: boolean;
   }[];
+  /**
+   * Collections published from *other* files. `getLocalVariableCollectionsAsync()` cannot see
+   * these, so if a collection is missing from `collections` above it will show up here.
+   */
+  libraryCollections: { name: string; libraryName: string; key: string }[];
+  /** Populated instead of `libraryCollections` when the team-library lookup isn't permitted. */
+  libraryLookupError: string | null;
   /** Distribution of raw value shapes across every color variable and mode. */
   valueShapeCounts: Record<string, number>;
   /** Full raw dumps for variables known to be alias+opacity in the Figma file. */

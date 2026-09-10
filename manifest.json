@@ -5,6 +5,7 @@
   "main": "dist/code.js",
   "ui": "dist/ui.html",
   "editorType": ["figma"],
+  "permissions": ["teamlibrary"],
   "networkAccess": {
     "allowedDomains": ["https://api.github.com"],
     "reasoning": "Required to push exported design token JSON to a user-specified GitHub repository."

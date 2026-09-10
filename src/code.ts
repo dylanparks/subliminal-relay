@@ -19,16 +19,10 @@ import {
   VariableProbe,
 } from './types';
 
-const PLUGIN_VERSION = '0.2.0';
+const PLUGIN_VERSION = '0.3.0';
 
-/** Variables whose Figma values are known to be alias + opacity — used by the diagnostic. */
-const COMPOSED_PROBE_TARGETS = [
-  'Neutral/Content/Secondary',
-  'Neutral/Stroke/Default',
-  'Interactive/Primary/Filled/Background/Hover',
-  'Interactive/Primary/Hollow/Stroke/Default',
-  'Effects/ShadowDefault',
-];
+/** How many of each discovered category the diagnostic dumps in full. */
+const PROBES_PER_CATEGORY = 4;
 
 figma.showUI(__html__, { width: 480, height: 580, title: 'Subliminal Relay' });
 
@@ -352,6 +346,7 @@ async function runDiagnostic(): Promise<void> {
   const undocumented = new Set<string>();
   const shapeCounts: Record<string, number> = {};
   const probes: VariableProbe[] = [];
+  const categoryCounts: Record<string, number> = {};
 
   function classify(value: VariableValue): string {
     if (isVariableAlias(value)) return 'VariableAlias';
@@ -384,23 +379,38 @@ async function runDiagnostic(): Promise<void> {
         }
       }
 
-      if (COMPOSED_PROBE_TARGETS.indexOf(variable.name) !== -1) {
-        const values: RawValueProbe[] = collection.modes.map((mode) => {
-          const raw = variable.valuesByMode[mode.modeId];
-          return {
-            modeName: mode.name,
-            jsType: typeof raw,
-            objectKeys: raw && typeof raw === 'object' ? Object.keys(raw) : null,
-            json: JSON.stringify(raw),
-          };
-        });
+      // Probe candidates are *discovered*, not hardcoded — a fixed name list goes stale the
+      // moment the Figma file is restructured. A translucent RGBA is the signature of a
+      // flattened alias+opacity, so those are the interesting ones; aliases and opaque values
+      // are sampled alongside them for contrast.
+      if (variable.resolvedType === 'COLOR') {
+        const shapes = collection.modes
+          .map((mode) => variable.valuesByMode[mode.modeId])
+          .filter((raw) => raw !== undefined)
+          .map(classify);
 
-        probes.push({
-          collectionName: collection.name,
-          variableName: variable.name,
-          resolvedType: variable.resolvedType,
-          values,
-        });
+        const category = shapes.indexOf('RGBA (alpha < 1)') !== -1
+          ? 'translucent'
+          : shapes.indexOf('VariableAlias') !== -1 ? 'alias' : 'opaque';
+
+        if ((categoryCounts[category] || 0) < PROBES_PER_CATEGORY) {
+          categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+
+          probes.push({
+            collectionName: collection.name,
+            variableName: variable.name,
+            resolvedType: variable.resolvedType,
+            values: collection.modes.map((mode) => {
+              const raw = variable.valuesByMode[mode.modeId];
+              return {
+                modeName: mode.name,
+                jsType: typeof raw,
+                objectKeys: raw && typeof raw === 'object' ? Object.keys(raw) : null,
+                json: JSON.stringify(raw),
+              };
+            }),
+          });
+        }
       }
     }
   }
@@ -410,9 +420,26 @@ async function runDiagnostic(): Promise<void> {
     ? `Undocumented field(s) present on raw values: ${Array.from(undocumented).join(', ')} — the runtime API may expose composition the typings don't declare. Inspect the probes below.`
     : 'No fields beyond the documented RGB/RGBA/VariableAlias shape. If the probes show plain RGBA with alpha < 1, the Plugin API has flattened alias+opacity and the base-variable link is NOT readable from a plugin.';
 
+  // A collection published from another file is invisible to getLocalVariableCollectionsAsync,
+  // which is the most likely reason a collection would appear "missing" from an export.
+  let libraryCollections: { name: string; libraryName: string; key: string }[] = [];
+  let libraryLookupError: string | null = null;
+  try {
+    const libs = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+    libraryCollections = libs.map((l) => ({
+      name: l.name,
+      libraryName: l.libraryName,
+      key: l.key,
+    }));
+  } catch (err) {
+    libraryLookupError = err instanceof Error ? err.message : String(err);
+  }
+
   const report: DiagnosticReport = {
     figmaFileName: figma.root.name,
     pluginApiVerdict: verdict,
+    libraryCollections,
+    libraryLookupError,
     collections: collections.map((c) => ({
       name: c.name,
       id: c.id,

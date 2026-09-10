@@ -53,6 +53,25 @@ export function Diagnostics({ report, loading, onRun }: Props) {
           </div>
 
           <div className="diagnostic-section">
+            <strong>Library collections (published from other files)</strong>
+            {report.libraryLookupError ? (
+              <p className="panel-description">Lookup failed: {report.libraryLookupError}</p>
+            ) : report.libraryCollections.length === 0 ? (
+              <p className="panel-description">
+                None — every collection is local, so nothing is being missed this way.
+              </p>
+            ) : (
+              <ul>
+                {report.libraryCollections.map((c) => (
+                  <li key={c.key}>
+                    {c.name} — from “{c.libraryName}”
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="diagnostic-section">
             <strong>Raw value shapes across all colour variables</strong>
             <ul>
               {Object.keys(report.valueShapeCounts).map((shape) => (
