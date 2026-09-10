@@ -8,9 +8,10 @@ interface Props {
 }
 
 /**
- * Answers one question: does the Figma Plugin API expose "alias + opacity" colors?
- * The published typings say no, but typings lag the runtime — this reports what
- * `valuesByMode` actually returns for variables known to be composed in the file.
+ * Reports what `valuesByMode` actually returns, shape by shape. It was written to settle whether
+ * the Plugin API exposes "alias + opacity" at all — it does, as VARIABLE_EXPRESSION /
+ * COMPOSE_COLOR — and it stays useful as a way to spot a value shape Relay doesn't yet handle
+ * after Figma ships something new or the file gets restructured.
  */
 export function Diagnostics({ report, loading, onRun }: Props) {
   const handleCopy = () => {
@@ -20,9 +21,9 @@ export function Diagnostics({ report, loading, onRun }: Props) {
   return (
     <div className="panel">
       <p className="panel-description">
-        Inspects what the Plugin API actually returns for colour variables defined as an alias
-        plus an opacity. Run this once and share the output — it determines whether Relay can
-        export the Brand-derivation relationship or only flattened colour values.
+        Inspects the raw value shapes the Plugin API returns for this file’s variables — including
+        alias-plus-opacity colours, and any collection that is subscribed from another library
+        rather than owned here. Run it whenever an export looks incomplete.
       </p>
 
       {!report ? (
@@ -83,7 +84,7 @@ export function Diagnostics({ report, loading, onRun }: Props) {
           </div>
 
           <div className="diagnostic-section">
-            <strong>Probes (variables that are alias + opacity in Figma)</strong>
+            <strong>Probes (a sample of each value shape, dumped raw)</strong>
             <div className="token-preview">
               <pre>{JSON.stringify(report.probes, null, 2)}</pre>
             </div>

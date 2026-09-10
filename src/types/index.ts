@@ -22,9 +22,45 @@ export interface AliasData {
   targetVariableSetName: string;
 }
 
-/** Records "alias + opacity" composition, when Figma exposes it. See DIAGNOSTIC notes. */
+/**
+ * Undocumented runtime shape returned by `valuesByMode` for a colour defined as
+ * "alias + opacity". The published typings declare VariableValue as
+ * boolean | string | number | RGB | RGBA | MotionEasing | VariableAlias, with no member for
+ * this — confirmed present at runtime (2026-09-10) by the Diagnostics tab, which reports raw
+ * object keys rather than trusting the type.
+ *
+ *   { type: 'VARIABLE_EXPRESSION',
+ *     expressionFunction: 'COMPOSE_COLOR',
+ *     expressionArguments: [ { type: 'VARIABLE_ALIAS', id }, 80 ] }
+ *
+ * The trailing number is opacity on a 0–100 scale (fractional values occur), so
+ * alpha = opacity / 100.
+ */
+export interface VariableExpressionValue {
+  type: 'VARIABLE_EXPRESSION';
+  expressionFunction: string;
+  expressionArguments: unknown[];
+}
+
+/**
+ * What `valuesByMode` can actually hold. The ambient `VariableValue` omits expressions, so
+ * reading a raw value through this type keeps the narrowing honest instead of casting at
+ * every call site.
+ */
+export type RuntimeVariableValue = VariableValue | VariableExpressionValue;
+
+/**
+ * Records "alias + opacity" composition, matching Figma's native export shape.
+ *
+ * `colorArg.alias` mirrors how `$value` treats aliases: a base in the *same* collection is
+ * identified by name alone, while one in another collection carries the full `AliasData`.
+ * Verified against native exports of both modes — 260 of 261 composed tokens use the short
+ * form, and the one composing straight onto a Global Values variable uses the long one.
+ */
 export interface ComposedColor {
-  colorArg: { type: 'alias'; alias: { targetVariableName: string } } | { type: 'color'; value: ColorValue };
+  colorArg:
+    | { type: 'alias'; alias: { targetVariableName: string } | AliasData }
+    | { type: 'color'; value: ColorValue };
   opacityArg: { type: 'number'; value: number };
 }
 
@@ -37,6 +73,12 @@ export interface DesignToken {
     'com.figma.scopes'?: string[];
     'com.figma.aliasData'?: AliasData;
     'com.figma.composedColor'?: ComposedColor;
+    /**
+     * Relay-only. Figma has no equivalent, because Figma understands all of its own
+     * expression functions. Set when a value is a `VARIABLE_EXPRESSION` Relay can't evaluate,
+     * so a new expression kind surfaces as a visible marker instead of a silently empty value.
+     */
+    'com.subliminal.unsupportedExpression'?: { expressionFunction: string; raw: string };
   };
 }
 

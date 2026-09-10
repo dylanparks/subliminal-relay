@@ -1,6 +1,6 @@
 {
   "name": "subliminal-relay",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "A Figma plugin exclusive to the Subliminal Design System for exporting design tokens and styles as JSON via GitHub or manual download.",
   "private": true,
   "scripts": {

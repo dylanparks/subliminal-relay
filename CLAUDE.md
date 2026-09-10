@@ -15,7 +15,7 @@ custom properties consumed by ~39 React components.**
 
 ## Current state (2026-09-10)
 
-Working branch: **`claude/brand-alpha-export`**. Version `0.3.0`.
+Working branch: **`claude/brand-alpha-export`**. Version `0.4.0`.
 
 ```bash
 npm install     # lockfile changed — a broken dep was removed
@@ -74,56 +74,65 @@ This is a deliberate choice: it makes a Relay export and a manual "Export variab
 from Figma **interchangeable**, so the SDS pipeline only ever needs one parser. Don't invent a
 bespoke format.
 
-## 🔴 The open question — settle this before designing the emitter
+## ✅ Settled: the Plugin API *does* expose "alias + opacity"
 
-**Does the Figma Plugin API expose "alias + opacity" composition at all?**
+This was the blocking question, and the Diagnostics tab answered it against the real file. The
+published typings (`@figma/plugin-typings@1.138.0`) declare `VariableValue` as
+`boolean | string | number | RGB | RGBA | MotionEasing | VariableAlias` with no composed-colour
+member — but the typings lag the runtime. `valuesByMode` actually returns:
 
-Figma's *native* export clearly has it (`$extensions["com.figma.composedColor"]` with `colorArg`
-and `opacityArg`). But the published typings (`@figma/plugin-typings@1.138.0`) declare:
-
-```ts
-type VariableValue = boolean | string | number | RGB | RGBA | MotionEasing | VariableAlias
+```jsonc
+{ "type": "VARIABLE_EXPRESSION",
+  "expressionFunction": "COMPOSE_COLOR",
+  "expressionArguments": [ { "type": "VARIABLE_ALIAS", "id": "VariableID:425:16248" }, 80 ] }
 ```
 
-— with **no composed-colour member**. Typings do lag the runtime, so this isn't conclusive.
+The trailing number is opacity on a **0–100** scale (fractional values occur), and
+`alpha = Math.fround(opacity / 100)` — `fround`, not plain division, is what reproduces Figma's
+own `0.800000011920929`.
 
-Two possible outcomes, needing very different designs:
+This is the good outcome. Composition is read directly, so none of the fallbacks matter: no RGB
+matching against Brand (which couldn't have disambiguated `Brand/Primary` from `Brand/Accent` —
+both `#1A39DE` in light mode) and no path-name heuristics.
 
-- **`valuesByMode` returns resolved `RGBA`** → composition is only *partly* recoverable by
-  matching RGB against Brand, and it's **genuinely ambiguous**: in light mode `Brand/Primary` and
-  `Brand/Accent` are both `#1A39DE`, and `Background`/`Static`/`Primary-foreground`/
-  `Secondary-foreground` are all `#FFFFFF`. Checking both modes disambiguates some but *not*
-  Primary-vs-Accent. That leaves path-name heuristics — rejected, since it's how you ship a
-  subtly wrong colour that nobody notices for a year.
-- **It returns a bare `VariableAlias` with opacity dropped** → worse, and silent: hover, active
-  and disabled would all collapse to `{Brand.Primary}`.
+`VariableExpressionValue` in `src/types/index.ts` declares the shape; `isVariableExpression` in
+`code.ts` guards it. Only `COMPOSE_COLOR` is understood — any other `expressionFunction` is
+emitted with a `com.subliminal.unsupportedExpression` marker rather than a silently empty value,
+and the Diagnostics verdict calls it out.
 
-**How to settle it:** the plugin's **Diagnostics** tab. It dumps raw `valuesByMode` for
-auto-discovered composed candidates and — the important part — reports the *actual runtime object
-keys*, so an undocumented field would surface even though the typings don't declare one. Run it
-against the real Figma file and read the verdict.
+### Emitted shape
 
-Do **not** design the emitter before this is answered.
+Composed colours match Figma's native export exactly: `$value` is the base colour carrying the
+composed alpha, and the relationship lives in `$extensions["com.figma.composedColor"]`.
+Composition is checked **before** aliasing — a composed colour's first argument *is* an alias, but
+Figma never emits a `{Ref}` or `aliasData` for one.
 
-## 🔴 Second open question — are collections missing from the export?
+`colorArg.alias` has two forms, mirroring how `$value` treats aliases:
 
-Reported symptom: not all collections come through.
+- base in the **same collection** → `{ targetVariableName: "Brand/Neutral" }` (slash form here,
+  even though same-collection `{Ref}` values use the dot form)
+- base in **another collection** → the full `AliasData` object
 
-Note that extraction does **not** filter by collection name — it iterates whatever
-`getLocalVariableCollectionsAsync()` returns. So a stale name list isn't the cause (that *was* a
-bug in the diagnostic's probe list, now fixed by discovering probes by value shape instead).
+260 of 261 composed tokens use the short form; `Status/Error/Stroke/Default` in Lightmode is the
+one long-form case, composing straight onto Global Values' `Colors/Red/600` at 30%.
 
-Leading hypothesis: **`getLocalVariableCollectionsAsync()` cannot see collections published from
-another file.** If Global Values is a subscribed library collection rather than one this file
-owns, it's invisible to that call. Supporting evidence: exported alias data carries
-`targetVariableSetId: "...a06b48.../-1:-1"`, and that `/-1:-1` suffix is characteristic of a
-subscribed library variable.
+## ✅ Settled: collections were missing because they're subscribed from a library
 
-The Diagnostics tab now reports library collections separately (via
-`figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync()`, guarded — needs the
-`teamlibrary` manifest permission, which is present). If the local list is short and a library
-collection shows up there, that's the answer, and the fix is importing library variables by key
-(`figma.variables.importVariableByKeyAsync`) rather than anything name-related.
+`getLocalVariableCollectionsAsync()` only returns collections the file *owns*. Global Values is
+published from another file, so it was invisible — and every `Brand/*` token aliases into it,
+which meant they all resolved to `null` and would have emitted an empty `$value`.
+
+Extraction never filtered by collection name, so a stale name list was never the cause. (That
+*was* a bug in the diagnostic's probe list, fixed separately.)
+
+The fix is in `buildVariableIndex`: after indexing the local collections it chases every
+alias/expression target id through `getVariableByIdAsync` until the set closes, pulling in library
+variables one at a time. Depth-capped at 12 hops. `getVariableCollectionByIdAsync` fills in the
+owning collection so cross-collection alias data stays accurate.
+
+Diagnostics still reports library collections separately (via
+`figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync()`, which needs the `teamlibrary`
+manifest permission — present), which is the fastest way to confirm this if it recurs.
 
 ## Verification expectations
 
@@ -136,6 +145,16 @@ There's no test suite. Minimum bar before claiming something works:
   says nothing about whether Figma can actually render the panel.
 - Anything touching the Figma API itself can only be verified by Dylan running it in Figma.
   Say so plainly rather than implying you tested it.
+
+**The emitter, though, can be verified offline** — and should be, because it's where the subtle
+bugs live. Take a pair of real "Export variables" downloads from Figma, reconstruct the runtime
+state they imply (`{Ref}` → `VARIABLE_ALIAS`, `composedColor` → `VARIABLE_EXPRESSION`, `aliasData`
+→ an alias into a synthetic library collection), stub the `figma` global with it, transpile
+`src/code.ts` with `ts.transpileModule`, and diff the emitted files against the originals with
+`JSON.stringify` — key order included, since matching Figma's key order is the whole point.
+
+That round trip currently passes on all 386 tokens across Lightmode and Darkmode. It's what caught
+the two-form `colorArg.alias` shape, which reading the emitter alone would not have.
 
 ## Conventions
 
