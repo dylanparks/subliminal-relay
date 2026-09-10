@@ -21,7 +21,7 @@ import {
   VariableProbe,
 } from './types';
 
-const PLUGIN_VERSION = '0.4.0';
+const PLUGIN_VERSION = '0.4.1';
 
 /** How many of each discovered category the diagnostic dumps in full. */
 const PROBES_PER_CATEGORY = 4;
@@ -251,6 +251,25 @@ function mapVariableType(type: VariableResolvedDataType): string {
 }
 
 /**
+ * The Plugin API and the native export disagree on one scope name: `variable.scopes` reports
+ * `STROKE_COLOR` where "Export variables" writes `STROKE`. Every other value that appears in both
+ * — ALL_SCOPES, ALL_FILLS, FRAME_FILL, SHAPE_FILL, TEXT_FILL, EFFECT_COLOR, EFFECT_FLOAT — is
+ * spelled identically, so this is a one-entry map rather than a translation table.
+ *
+ * Scopes that only occur in collections we have no native export to compare against
+ * (CORNER_RADIUS, FONT_*, LINE_HEIGHT, LETTER_SPACING, STROKE_FLOAT, …) pass through untouched.
+ * That's the honest default — inventing a mapping for them would be guessing — but if a hand
+ * export of Shape and Space or Responsive Typography ever disagrees, this map is where it's fixed.
+ */
+const NATIVE_SCOPE_NAMES: Record<string, string> = {
+  STROKE_COLOR: 'STROKE',
+};
+
+function toNativeScopes(scopes: readonly string[]): string[] {
+  return scopes.map((scope) => NATIVE_SCOPE_NAMES[scope] || scope);
+}
+
+/**
  * Identify an alias target the way Figma's export does. An unresolvable target is named rather
  * than dropped, so a broken link is visible in the output instead of looking like a plain value.
  */
@@ -280,10 +299,9 @@ function buildToken(
     $value: '',
   };
   if (variable.description) token.$description = variable.description;
-  token.$extensions = {
-    'com.figma.variableId': variable.id,
-    'com.figma.scopes': variable.scopes,
-  };
+  token.$extensions = { 'com.figma.variableId': variable.id };
+  // Figma omits the key entirely for a variable with no scopes rather than writing `[]`.
+  if (variable.scopes.length > 0) token.$extensions['com.figma.scopes'] = toNativeScopes(variable.scopes);
 
   // Composition is checked before aliasing: a composed colour's first argument *is* an alias,
   // but Figma emits the flattened value plus `composedColor` — never a `{Ref}` and never

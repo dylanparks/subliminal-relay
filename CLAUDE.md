@@ -15,7 +15,7 @@ custom properties consumed by ~39 React components.**
 
 ## Current state (2026-09-10)
 
-Working branch: **`claude/brand-alpha-export`**. Version `0.4.0`.
+Working branch: **`claude/brand-alpha-export`**. Version `0.4.1`.
 
 ```bash
 npm install     # lockfile changed — a broken dep was removed
@@ -27,6 +27,11 @@ Then in Figma: **Plugins → Development → Import plugin from manifest** → p
 `manifest.json` ships with `"id": "REPLACE_WITH_FIGMA_PLUGIN_ID"`. Dylan sets a real id in his
 local copy — **don't overwrite it**, and don't invent one (it could collide with a real published
 plugin id).
+
+**Confirmed working in Figma (2026-09-10):** Dylan ran a real export off v0.4.0. All four
+collections came through with every mode — Global Values ×1, Intent Colors ×2, Shape and Space ×2
+(`Subliminal Brand` / `Example Brand`), Responsive Typography ×3 — 336 / 193 / 14 / 65 variables
+respectively, no empty `$value`, no unsupported expressions.
 
 ## ⚠️ This scaffold was never actually working — verify, don't assume
 
@@ -113,8 +118,23 @@ Figma never emits a `{Ref}` or `aliasData` for one.
   even though same-collection `{Ref}` values use the dot form)
 - base in **another collection** → the full `AliasData` object
 
-260 of 261 composed tokens use the short form; `Status/Error/Stroke/Default` in Lightmode is the
-one long-form case, composing straight onto Global Values' `Colors/Red/600` at 30%.
+In the 2026-09-09 native export, 260 of 261 composed tokens used the short form and
+`Status/Error/Stroke/Default` was the one long-form case (composing straight onto Global Values'
+`Colors/Red/600` at 30%). Dylan has since repointed it at `Brand/Negative`, so **the current file
+has no long-form case at all** — which is why the round-trip fixture matters more than a live
+export for keeping that branch honest.
+
+### Scope names: one deliberate translation
+
+`variable.scopes` reports `STROKE_COLOR` where the native export writes `STROKE`; everything
+appearing in both is spelled identically. `NATIVE_SCOPE_NAMES` in `code.ts` is that one-entry map.
+Scopes occurring only in collections with no native export to compare against (CORNER_RADIUS,
+FONT_*, LINE_HEIGHT, LETTER_SPACING, STROKE_FLOAT, …) pass through untouched rather than being
+guessed at — if a hand export of Shape and Space or Responsive Typography ever disagrees, that map
+is the place to fix it.
+
+Figma also **omits** `com.figma.scopes` entirely for a variable with no scopes; Relay does the
+same rather than writing `[]`.
 
 ## ✅ Settled: collections were missing because they're subscribed from a library
 
