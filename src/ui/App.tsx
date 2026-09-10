@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { GitHubExport } from './components/GitHubExport';
 import { ManualExport } from './components/ManualExport';
-import { PluginToUIMessage, SubliminalTokenExport } from '../types';
+import { Diagnostics } from './components/Diagnostics';
+import { DiagnosticReport, PluginToUIMessage, SubliminalTokenExport } from '../types';
 import './styles/App.css';
 
-type Tab = 'github' | 'manual';
+type Tab = 'github' | 'manual' | 'diagnostics';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('github');
   const [tokens, setTokens] = useState<SubliminalTokenExport | null>(null);
+  const [diagnostic, setDiagnostic] = useState<DiagnosticReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +25,10 @@ export default function App() {
           setTokens(msg.payload);
           setLoading(false);
           break;
+        case 'DIAGNOSTIC_COMPLETE':
+          setDiagnostic(msg.payload);
+          setLoading(false);
+          break;
         case 'EXPORT_ERROR':
           setError(msg.message);
           setLoading(false);
@@ -34,10 +40,10 @@ export default function App() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  const handleExtract = () => {
+  const send = (type: 'EXTRACT_TOKENS' | 'RUN_DIAGNOSTIC') => {
     setError(null);
     setLoading(true);
-    parent.postMessage({ pluginMessage: { type: 'EXTRACT_TOKENS' } }, '*');
+    parent.postMessage({ pluginMessage: { type } }, '*');
   };
 
   return (
@@ -59,6 +65,12 @@ export default function App() {
         >
           Manual Export
         </button>
+        <button
+          className={`tab-btn${activeTab === 'diagnostics' ? ' active' : ''}`}
+          onClick={() => setActiveTab('diagnostics')}
+        >
+          Diagnostics
+        </button>
       </div>
 
       <main className="app-content">
@@ -68,7 +80,7 @@ export default function App() {
           <GitHubExport
             tokens={tokens}
             loading={loading}
-            onExtract={handleExtract}
+            onExtract={() => send('EXTRACT_TOKENS')}
           />
         )}
 
@@ -76,7 +88,15 @@ export default function App() {
           <ManualExport
             tokens={tokens}
             loading={loading}
-            onExtract={handleExtract}
+            onExtract={() => send('EXTRACT_TOKENS')}
+          />
+        )}
+
+        {activeTab === 'diagnostics' && (
+          <Diagnostics
+            report={diagnostic}
+            loading={loading}
+            onRun={() => send('RUN_DIAGNOSTIC')}
           />
         )}
       </main>

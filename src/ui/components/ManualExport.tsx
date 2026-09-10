@@ -1,5 +1,5 @@
 import React from 'react';
-import { SubliminalTokenExport } from '../../types';
+import { SubliminalTokenExport, TokenFile } from '../../types';
 
 interface Props {
   tokens: SubliminalTokenExport | null;
@@ -7,31 +7,37 @@ interface Props {
   onExtract: () => void;
 }
 
+function download(fileName: string, contents: string) {
+  const blob = new Blob([contents], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ManualExport({ tokens, loading, onExtract }: Props) {
-  const handleDownload = () => {
+  const downloadFile = (file: TokenFile) =>
+    download(file.fileName, JSON.stringify(file.tokens, null, 2));
+
+  // Browsers throttle rapid successive downloads, so stagger them rather than firing all at once.
+  const downloadAll = () => {
     if (!tokens) return;
-
-    const json = JSON.stringify(tokens, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `subliminal-tokens-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleCopy = () => {
-    if (!tokens) return;
-    navigator.clipboard.writeText(JSON.stringify(tokens, null, 2));
+    tokens.files.forEach((file, i) => {
+      setTimeout(() => downloadFile(file), i * 300);
+    });
+    setTimeout(
+      () => download('effect-styles.json', JSON.stringify(tokens.effectStyles, null, 2)),
+      tokens.files.length * 300,
+    );
   };
 
   return (
     <div className="panel">
       <p className="panel-description">
-        Extract your Subliminal design tokens and download or copy the JSON directly —
-        no GitHub connection required.
+        Extract your Subliminal design tokens — one file per collection per mode, matching
+        Figma's native variable-export shape.
       </p>
 
       {!tokens ? (
@@ -43,15 +49,32 @@ export function ManualExport({ tokens, loading, onExtract }: Props) {
         </div>
       ) : (
         <>
-          <div className="token-preview">
-            <pre>{JSON.stringify(tokens, null, 2)}</pre>
+          <div className="diagnostic-section">
+            <strong>
+              {tokens.files.length} file{tokens.files.length === 1 ? '' : 's'} from{' '}
+              {tokens.meta.collections.length} collection
+              {tokens.meta.collections.length === 1 ? '' : 's'}
+            </strong>
+            <ul>
+              {tokens.files.map((file) => (
+                <li key={file.fileName}>
+                  <button className="btn link" onClick={() => downloadFile(file)}>
+                    {file.fileName}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
+
           <div className="action-row">
-            <button className="btn primary" onClick={handleDownload}>
-              Download JSON
+            <button className="btn primary" onClick={downloadAll}>
+              Download All
             </button>
-            <button className="btn secondary" onClick={handleCopy}>
-              Copy to Clipboard
+            <button
+              className="btn secondary"
+              onClick={() => navigator.clipboard.writeText(JSON.stringify(tokens, null, 2))}
+            >
+              Copy Full Payload
             </button>
             <button className="btn ghost" onClick={onExtract} disabled={loading}>
               {loading ? 'Re-extracting…' : 'Re-extract'}

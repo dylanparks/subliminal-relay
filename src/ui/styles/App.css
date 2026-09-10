@@ -245,3 +245,55 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ─── Diagnostics ─────────────────────────────────────────────────────────── */
+
+.diagnostic-verdict {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent, #3e5cff);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.diagnostic-verdict strong,
+.diagnostic-section strong {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.diagnostic-verdict p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diagnostic-section {
+  margin-bottom: 12px;
+}
+
+.diagnostic-section ul {
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.btn.link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent, #3e5cff);
+  cursor: pointer;
+  text-align: left;
+}
+
+.btn.link:hover {
+  text-decoration: underline;
+}

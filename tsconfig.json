@@ -8,7 +8,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "typeRoots": ["./node_modules/@figma/plugin-typings", "./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types", "./node_modules/@figma"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
