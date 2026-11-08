@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DiagnosticReport } from '../../types';
+import { copyToClipboard } from '../lib/clipboard';
 
 interface Props {
   report: DiagnosticReport | null;
@@ -14,8 +15,13 @@ interface Props {
  * after Figma ships something new or the file gets restructured.
  */
 export function Diagnostics({ report, loading, onRun }: Props) {
-  const handleCopy = () => {
-    if (report) navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  const handleCopy = async () => {
+    if (!report) return;
+    const succeeded = await copyToClipboard(JSON.stringify(report, null, 2));
+    setCopyState(succeeded ? 'copied' : 'failed');
+    setTimeout(() => setCopyState('idle'), 2000);
   };
 
   return (
@@ -92,7 +98,7 @@ export function Diagnostics({ report, loading, onRun }: Props) {
 
           <div className="action-row">
             <button className="btn primary" onClick={handleCopy}>
-              Copy Report
+              {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed' : 'Copy Report'}
             </button>
             <button className="btn ghost" onClick={onRun} disabled={loading}>
               {loading ? 'Re-running…' : 'Re-run'}

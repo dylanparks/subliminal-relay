@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { strToU8, zipSync } from 'fflate';
 import { SubliminalTokenExport, TokenFile } from '../../types';
 import { ExportProblems } from './ExportProblems';
+import { copyToClipboard } from '../lib/clipboard';
 
 interface Props {
   tokens: SubliminalTokenExport | null;
@@ -24,7 +25,7 @@ function download(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-const json = (value: unknown) => JSON.stringify(value, null, 2);
+const json =(value: unknown) => JSON.stringify(value, null, 2);
 
 /** Every file "Download All" produces, at the archive root — the same layout as a hand-made ZIP. */
 function buildZip(tokens: SubliminalTokenExport): Blob {
@@ -39,8 +40,17 @@ function buildZip(tokens: SubliminalTokenExport): Blob {
 }
 
 export function ManualExport({ tokens, loading, onExtract }: Props) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
   const downloadFile = (file: TokenFile) =>
     download(file.fileName, new Blob([json(file.tokens)], { type: 'application/json' }));
+
+  const handleCopyPayload = async () => {
+    if (!tokens) return;
+    const succeeded = await copyToClipboard(json(tokens));
+    setCopyState(succeeded ? 'copied' : 'failed');
+    setTimeout(() => setCopyState('idle'), 2000);
+  };
 
   // One archive, one save dialog. Downloading each file separately opened a dialog per file in
   // Figma desktop — eight of them for a full export of the current file.
@@ -87,11 +97,8 @@ export function ManualExport({ tokens, loading, onExtract }: Props) {
             <button className="btn primary" onClick={downloadAll}>
               Download All (.zip)
             </button>
-            <button
-              className="btn secondary"
-              onClick={() => navigator.clipboard.writeText(JSON.stringify(tokens, null, 2))}
-            >
-              Copy Full Payload
+            <button className="btn secondary" onClick={handleCopyPayload}>
+              {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed' : 'Copy Full Payload'}
             </button>
             <button className="btn ghost" onClick={onExtract} disabled={loading}>
               {loading ? 'Re-extracting…' : 'Re-extract'}
