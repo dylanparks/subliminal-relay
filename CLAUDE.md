@@ -21,6 +21,17 @@ Working branch: **`claude/brand-alpha-export`**. Version `0.5.0`.
 Every Relay ≤ 0.4.1 export of a current file silently ships 249 raw API objects in place of
 colours. 0.5.0 reads both formats and refuses to emit anything it can't read.
 
+**Confirmed working in Figma (2026-11-07):** 249 composed colours, an empty `meta.problems`, and the
+v0.4.1 scope fixes present. That export is the Phase T.2 input, committed to `subliminal-design-system` at
+`design-system/src/tokens/relay-export/` on `claude/brand-alpha-tokens`.
+
+**If an export ever looks stale, check the build before the code.** Twice, the cause was an
+out-of-date `dist/`, not a bug: once Figma was loading a different copy of the plugin, and once an
+earlier `git pull` had stopped on uncommitted local changes. Uncommitted changes that overlap an
+incoming commit make `git pull` refuse, and a failed `npm run build` leaves the old `dist/` in place,
+so Figma keeps loading old code without any error. A quick tell: the Manual Export button reads
+"Download All (.zip)" from 0.5.0 onward.
+
 ```bash
 npm install     # lockfile changed — a broken dep was removed
 npm run build   # REQUIRED: dist/ is gitignored, so pulling never refreshes the bundle
@@ -217,8 +228,9 @@ state they imply (`{Ref}` → `VARIABLE_ALIAS`, `composedColor` → `VARIABLE_EX
 That round trip caught the two-form `colorArg.alias` shape, which reading the emitter alone would
 not have. As of 0.5.0 the harness runs three checks, and all pass:
 
-1. **Parity** — the committed 2026-09 export (`subliminal-design-system`:
-   `design-system/src/tokens/relay-export/`, 945 tokens) rebuilt from *each* runtime shape in turn;
+1. **Parity** — the committed 2026-09 export (`subliminal-design-system` at commit `f1310e1`,
+   `design-system/src/tokens/relay-export/`, 945 tokens — later commits replace that folder with
+   the current export) rebuilt from *each* runtime shape in turn;
    both reproduce it byte-for-byte. (The 2026-09 native files themselves were lost to a container
    recycle; that export was verified against them at the time, differing only in the two scope
    fixes, which the harness applies.)
@@ -232,6 +244,11 @@ not have. As of 0.5.0 the harness runs three checks, and all pass:
 
 The fixtures are brand data, so the harness lives outside the repo; the steps above are enough
 to rebuild it.
+
+**The harness predicts real Figma output.** Before Dylan first ran 0.5.0 in Figma (2026-11-07), the
+harness predicted its output from the previous export's raw data. The real export matched on 937 of
+938 tokens, with 6 of 7 files byte-identical, and the one difference was a Figma edit made between the
+two runs. So a clean harness run is strong evidence, not just a self-consistency check.
 
 ## Conventions
 
