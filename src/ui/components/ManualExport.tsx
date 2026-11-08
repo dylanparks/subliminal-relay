@@ -1,4 +1,5 @@
 import React from 'react';
+import { strToU8, zipSync } from 'fflate';
 import { SubliminalTokenExport, TokenFile } from '../../types';
 import { ExportProblems } from './ExportProblems';
 
@@ -8,8 +9,13 @@ interface Props {
   onExtract: () => void;
 }
 
-function download(fileName: string, contents: string) {
-  const blob = new Blob([contents], { type: 'application/json' });
+/**
+ * The name SDS's `sds-build-tokens` CLI looks for when run without `--input`, so a download can
+ * be dropped into a project as-is.
+ */
+const ZIP_NAME = 'subliminal-tokens.zip';
+
+function download(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -18,20 +24,28 @@ function download(fileName: string, contents: string) {
   URL.revokeObjectURL(url);
 }
 
+const json = (value: unknown) => JSON.stringify(value, null, 2);
+
+/** Every file "Download All" produces, at the archive root — the same layout as a hand-made ZIP. */
+function buildZip(tokens: SubliminalTokenExport): Blob {
+  const entries: Record<string, Uint8Array> = {};
+  for (const file of tokens.files) entries[file.fileName] = strToU8(json(file.tokens));
+  entries['effect-styles.json'] = strToU8(json(tokens.effectStyles));
+
+  const zip = zipSync(entries, { level: 6 });
+  // Copy into a plain ArrayBuffer: TS's DOM typings reject a Uint8Array that might be backed by
+  // a SharedArrayBuffer as a BlobPart.
+  return new Blob([zip.slice().buffer as ArrayBuffer], { type: 'application/zip' });
+}
+
 export function ManualExport({ tokens, loading, onExtract }: Props) {
   const downloadFile = (file: TokenFile) =>
-    download(file.fileName, JSON.stringify(file.tokens, null, 2));
+    download(file.fileName, new Blob([json(file.tokens)], { type: 'application/json' }));
 
-  // Browsers throttle rapid successive downloads, so stagger them rather than firing all at once.
+  // One archive, one save dialog. Downloading each file separately opened a dialog per file in
+  // Figma desktop — eight of them for a full export of the current file.
   const downloadAll = () => {
-    if (!tokens) return;
-    tokens.files.forEach((file, i) => {
-      setTimeout(() => downloadFile(file), i * 300);
-    });
-    setTimeout(
-      () => download('effect-styles.json', JSON.stringify(tokens.effectStyles, null, 2)),
-      tokens.files.length * 300,
-    );
+    if (tokens) download(ZIP_NAME, buildZip(tokens));
   };
 
   return (
@@ -71,7 +85,7 @@ export function ManualExport({ tokens, loading, onExtract }: Props) {
 
           <div className="action-row">
             <button className="btn primary" onClick={downloadAll}>
-              Download All
+              Download All (.zip)
             </button>
             <button
               className="btn secondary"
