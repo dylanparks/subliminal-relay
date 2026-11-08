@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GitHubConfig, SubliminalTokenExport } from '../../types';
 import { pushToGitHub } from '../lib/github';
+import { ExportProblems } from './ExportProblems';
 
 interface Props {
   tokens: SubliminalTokenExport | null;
@@ -124,6 +125,8 @@ export function GitHubExport({ tokens, loading, onExtract }: Props) {
         </div>
       </div>
 
+      {tokens && <ExportProblems problems={tokens.meta.problems} />}
+
       {status === 'success' && <div className="status-banner success">{statusMessage}</div>}
       {status === 'error' && <div className="status-banner error">{statusMessage}</div>}
 
@@ -142,7 +145,7 @@ export function GitHubExport({ tokens, loading, onExtract }: Props) {
             {status === 'pushing' ? 'Pushing…' : 'Push to GitHub'}
           </button>
         )}
-        {tokens && (
+        {tokens && tokens.meta.problems.length === 0 && (
           <span className="token-ready-badge">Tokens ready</span>
         )}
       </div>

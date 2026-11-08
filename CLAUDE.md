@@ -13,9 +13,13 @@ turns that JSON into `tokens.css` / `tokens.ts` via Style Dictionary.
 So Relay is one half of a pipeline: **Figma variables → Relay export → SDS token build → CSS
 custom properties consumed by ~39 React components.**
 
-## Current state (2026-09-10)
+## Current state (2026-11-08)
 
-Working branch: **`claude/brand-alpha-export`**. Version `0.4.1`.
+Working branch: **`claude/brand-alpha-export`**. Version `0.5.0`.
+
+**Figma changed the composed-colour runtime format in 2026-11** (see "Two runtime shapes" below).
+Every Relay ≤ 0.4.1 export of a current file silently ships 249 raw API objects in place of
+colours. 0.5.0 reads both formats and refuses to emit anything it can't read.
 
 ```bash
 npm install     # lockfile changed — a broken dep was removed
@@ -52,22 +56,25 @@ it.** `GitHubExport` in particular has never been run end-to-end as far as anyon
 
 ## The architecture that matters
 
-Dylan restructured the Figma file around Figma's **alpha-on-variable** feature, consolidating 12
-export files into **4 collections**: Global Values (336 vars), Intent Colors (193), Shape and
-Space (14), Responsive Typography (65).
+Dylan has restructured the Figma file around **opacity-on-variable** twice. As of 2026-11 it is
+**4 collections, with Brand as its own layer**:
 
-Measured from real exports of both modes:
+| Collection | Modes | Variables | Role |
+|---|---|---|---|
+| `Globals` | Value | 345 | Primitives: colour ramps, Transparent, font weights |
+| `Brand` | Default | 113 | **The brand file.** `Colors/Light/*` + `Colors/Dark/*` (25 each), radius, size, border thickness, font family/weight/letter-spacing |
+| `Color mode` | Lightmode, Darkmode | 181 | Intent tokens. Picks Light or Dark Brand colours and applies state opacities |
+| `Breakpoint` | XS, MD, LG | 39 | Font size, line height, viewport — numbers only; typeface is deliberately a Brand decision, not a breakpoint one |
 
-- **17 "Brand" tokens drive 169 of 176 intent tokens** — 131 are composed (a Brand alias + an
-  opacity), 38 are pure aliases.
-- **162 of 176 intent tokens derive identically in light and dark.** Only 8 differ by opacity,
-  6 by kind. Dark mode ≈ swap the 17 knobs + 14 overrides.
+Brand is *data* (one mode, a flat list of values); Color mode is *behaviour*. Measured on the
+2026-11 export: **174 of 181 intent tokens route through Brand** (124 composed + 50 aliases); the
+two exceptions are the `Accents/Gradient` start/end tokens, which point straight at Globals.
 
 The payoff, on the SDS side: emit Brand as its own CSS variable layer, then *derive* intent
-tokens with `color-mix(in srgb, var(--sds-brand-x) N%, transparent)`. **A whole new brand becomes
-~17 CSS variable overrides at runtime**, with no token rebuild. That's why preserving the
-"which Brand token + what opacity" relationship through the export matters so much — flattening
-it to literals throws away the entire benefit.
+tokens with `color-mix(in srgb, var(--sds-brand-x) N%, transparent)`, so a new brand is a set of
+runtime CSS variable overrides with no token rebuild. That's why preserving the "which Brand token
++ what opacity" relationship through the export matters so much — flattening it to literals
+throws away the entire benefit.
 
 ## Export format: Figma's native shape, deliberately
 
@@ -100,10 +107,40 @@ This is the good outcome. Composition is read directly, so none of the fallbacks
 matching against Brand (which couldn't have disambiguated `Brand/Primary` from `Brand/Accent` —
 both `#1A39DE` in light mode) and no path-name heuristics.
 
-`VariableExpressionValue` in `src/types/index.ts` declares the shape; `isVariableExpression` in
-`code.ts` guards it. Only `COMPOSE_COLOR` is understood — any other `expressionFunction` is
-emitted with a `com.subliminal.unsupportedExpression` marker rather than a silently empty value,
-and the Diagnostics verdict calls it out.
+### Two runtime shapes — Figma moved it once already
+
+In 2026-11, after opacity-on-variable shipped properly, the same data started arriving as:
+
+```jsonc
+{ "color": { "type": "VARIABLE_ALIAS", "id": "VariableID:442:10918" }, "opacity": 93 }
+```
+
+Still 0–100, still undocumented. Relay ≤ 0.4.1 only recognised the `VARIABLE_EXPRESSION` form, so
+this fell through to the literal branch and the raw object was written into `$value` — 249 tokens,
+in an export that otherwise looked complete. Nothing flagged it; it was caught by inspecting the
+JSON by hand.
+
+**Both shapes now go through one function, `readComposedColor`**, which normalizes either to a
+`{ color, opacity }` pair; every consumer (index closure, resolution, emission, diagnostics) works
+on that. If Figma moves it a third time, that function is the only place that changes. The old
+shape is kept rather than replaced, so older files keep exporting.
+
+Any other `expressionFunction` is emitted with a `com.subliminal.unsupportedExpression` marker.
+
+### The sanity check: never pass an unknown object through
+
+The real bug was not the format change — it was that an unrecognised value was *passed through*
+as if it were a colour. Two guards now make that impossible:
+
+- **`toTokenValue`** refuses any non-colour object: `$value` becomes `''` and the token gets a
+  `com.subliminal.unreadableValue` marker carrying the raw JSON. This covers both the direct path
+  and the cross-collection `aliasData` path, which could leak the same way.
+- **`describeProblem`** checks every emitted token's `$value` against its `$type` and collects
+  failures into `meta.problems`. Both export tabs show these in a red banner, and the GitHub tab
+  withholds its "Tokens ready" badge. An empty `meta.problems` is the definition of a sound export.
+
+The Diagnostics tab also names unrecognised shapes by their keys (`Unrecognised object {hue, mix}`)
+instead of reporting `object`, which is what hid the 2026-11 change.
 
 ### Emitted shape
 
@@ -120,9 +157,13 @@ Figma never emits a `{Ref}` or `aliasData` for one.
 
 In the 2026-09-09 native export, 260 of 261 composed tokens used the short form and
 `Status/Error/Stroke/Default` was the one long-form case (composing straight onto Global Values'
-`Colors/Red/600` at 30%). Dylan has since repointed it at `Brand/Negative`, so **the current file
-has no long-form case at all** — which is why the round-trip fixture matters more than a live
-export for keeping that branch honest.
+`Colors/Red/600` at 30%).
+
+**Since 2026-11 this has inverted:** Brand is its own collection, so every composed colour in
+Color mode is cross-collection and *all 249 now use the long form*. That rule was verified against
+native output on exactly one token. A native "Export variables" of Color mode would confirm it —
+and would also show whether Figma's *export* format moved along with the runtime one. Until that
+comparison is done, treat byte-parity with native as verified for 2026-09 only.
 
 ### Scope names: one deliberate translation
 
@@ -173,8 +214,24 @@ state they imply (`{Ref}` → `VARIABLE_ALIAS`, `composedColor` → `VARIABLE_EX
 `src/code.ts` with `ts.transpileModule`, and diff the emitted files against the originals with
 `JSON.stringify` — key order included, since matching Figma's key order is the whole point.
 
-That round trip currently passes on all 386 tokens across Lightmode and Darkmode. It's what caught
-the two-form `colorArg.alias` shape, which reading the emitter alone would not have.
+That round trip caught the two-form `colorArg.alias` shape, which reading the emitter alone would
+not have. As of 0.5.0 the harness runs three checks, and all pass:
+
+1. **Parity** — the committed 2026-09 export (`subliminal-design-system`:
+   `design-system/src/tokens/relay-export/`, 945 tokens) rebuilt from *each* runtime shape in turn;
+   both reproduce it byte-for-byte. (The 2026-09 native files themselves were lost to a container
+   recycle; that export was verified against them at the time, differing only in the two scope
+   fixes, which the harness applies.)
+2. **Real data** — a pre-0.5 export's leaked `$value`s *are* the literal `valuesByMode` objects,
+   so the 2026-11 export reconstructs the exact runtime state of the current file. All 249
+   composed colours recover with the right Brand base, name and `fround` alpha; the other 688
+   tokens are unchanged; and three rows match Figma AI's independently produced opacity table.
+3. **Discrimination** — the *old* code run on the same data must reproduce the 249 leaks (or test
+   2 proves nothing), and a made-up future shape must be emptied, marked, reported once per mode,
+   and named by the diagnostic.
+
+The fixtures are brand data, so the harness lives outside the repo; the steps above are enough
+to rebuild it.
 
 ## Conventions
 

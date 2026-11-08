@@ -1,5 +1,6 @@
 import React from 'react';
 import { SubliminalTokenExport, TokenFile } from '../../types';
+import { ExportProblems } from './ExportProblems';
 
 interface Props {
   tokens: SubliminalTokenExport | null;
@@ -49,6 +50,8 @@ export function ManualExport({ tokens, loading, onExtract }: Props) {
         </div>
       ) : (
         <>
+          <ExportProblems problems={tokens.meta.problems} />
+
           <div className="diagnostic-section">
             <strong>
               {tokens.files.length} file{tokens.files.length === 1 ? '' : 's'} from{' '}

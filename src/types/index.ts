@@ -23,8 +23,9 @@ export interface AliasData {
 }
 
 /**
- * Undocumented runtime shape returned by `valuesByMode` for a colour defined as
- * "alias + opacity". The published typings declare VariableValue as
+ * The *first* runtime shape Figma used for a colour defined as "alias + opacity" (2026-09);
+ * superseded by `ComposedColorValue` in 2026-11 but still read, so older files keep exporting.
+ * Also the carrier for any other expression function. The published typings declare VariableValue as
  * boolean | string | number | RGB | RGBA | MotionEasing | VariableAlias, with no member for
  * this — confirmed present at runtime (2026-09-10) by the Diagnostics tab, which reports raw
  * object keys rather than trusting the type.
@@ -43,11 +44,25 @@ export interface VariableExpressionValue {
 }
 
 /**
- * What `valuesByMode` can actually hold. The ambient `VariableValue` omits expressions, so
- * reading a raw value through this type keeps the narrowing honest instead of casting at
- * every call site.
+ * The shape Figma moved composed colours to once opacity-on-variable shipped properly —
+ * observed in a live export 2026-11-07, replacing `VariableExpressionValue` for the same data:
+ *
+ *   { color: { type: 'VARIABLE_ALIAS', id }, opacity: 80 }
+ *
+ * Opacity is still 0–100. Also undocumented in `@figma/plugin-typings` at the time of writing.
+ * Relay reads both shapes; see `readComposedColor` in code.ts.
  */
-export type RuntimeVariableValue = VariableValue | VariableExpressionValue;
+export interface ComposedColorValue {
+  color: unknown;
+  opacity: number;
+}
+
+/**
+ * What `valuesByMode` can actually hold. The ambient `VariableValue` omits both composed-colour
+ * shapes, so reading a raw value through this type keeps the narrowing honest instead of casting
+ * at every call site.
+ */
+export type RuntimeVariableValue = VariableValue | VariableExpressionValue | ComposedColorValue;
 
 /**
  * Records "alias + opacity" composition, matching Figma's native export shape.
@@ -79,6 +94,12 @@ export interface DesignToken {
      * so a new expression kind surfaces as a visible marker instead of a silently empty value.
      */
     'com.subliminal.unsupportedExpression'?: { expressionFunction: string; raw: string };
+    /**
+     * Relay-only. Set when `valuesByMode` held an object Relay doesn't recognise. `$value` is
+     * emptied rather than carrying the raw object, so a downstream parser never mistakes an
+     * API-internal shape for a colour. This is how the next Figma format change will surface.
+     */
+    'com.subliminal.unreadableValue'?: { raw: string };
   };
 }
 
@@ -87,6 +108,13 @@ export interface TokenCollection {
 }
 
 // ─── Export payload ─────────────────────────────────────────────────────────
+
+/** A token whose emitted `$value` doesn't match its `$type`. */
+export interface ExportProblem {
+  fileName: string;
+  tokenPath: string;
+  reason: string;
+}
 
 /** One emitted file: a single collection in a single mode. */
 export interface TokenFile {
@@ -102,6 +130,12 @@ export interface SubliminalTokenExport {
     pluginVersion: string;
     figmaFileName: string;
     collections: { name: string; modes: string[]; variableCount: number }[];
+    /**
+     * Every token whose `$value` doesn't match its `$type`. Empty means the export is sound.
+     * The UI shows these prominently: the 2026-11 export shipped 249 raw API objects as colour
+     * values and still looked complete, which is exactly the failure this exists to prevent.
+     */
+    problems: ExportProblem[];
   };
   files: TokenFile[];
   /** Effect styles carry real CSS, not just their names — SDS consumes `css.boxShadow`. */

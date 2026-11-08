@@ -216,6 +216,20 @@
   color: var(--color-error);
 }
 
+.status-banner p {
+  margin: 4px 0;
+}
+
+.status-banner ul {
+  margin: 6px 0;
+  padding-left: 16px;
+}
+
+.status-banner li {
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
 /* ─── Empty State ─────────────────────────────────────────────────────────── */
 
 .empty-state {

@@ -10,18 +10,21 @@ import {
   AliasData,
   ColorValue,
   ComposedColor,
+  ComposedColorValue,
   DesignToken,
   DiagnosticReport,
+  ExportProblem,
   RuntimeVariableValue,
   SubliminalTokenExport,
   TokenCollection,
   TokenFile,
+  TokenValue,
   UIToPluginMessage,
   VariableExpressionValue,
   VariableProbe,
 } from './types';
 
-const PLUGIN_VERSION = '0.4.1';
+const PLUGIN_VERSION = '0.5.0';
 
 /** How many of each discovered category the diagnostic dumps in full. */
 const PROBES_PER_CATEGORY = 4;
@@ -112,13 +115,17 @@ async function buildVariableIndex(collections: VariableCollection[]): Promise<Ma
   return index;
 }
 
-/** Every variable id a raw value points at — directly, or as an argument to an expression. */
-function aliasTargetIds(value: RuntimeVariableValue | undefined): string[] {
+/** Every variable id a raw value points at — directly, or through a composed colour or expression. */
+function aliasTargetIds(value: unknown): string[] {
   if (isVariableAlias(value)) return [value.id];
+
+  const composed = readComposedColor(value);
+  if (composed) return aliasTargetIds(composed.color);
+
   if (isVariableExpression(value)) {
     const ids: string[] = [];
     for (const arg of value.expressionArguments) {
-      for (const id of aliasTargetIds(arg as RuntimeVariableValue)) ids.push(id);
+      for (const id of aliasTargetIds(arg)) ids.push(id);
     }
     return ids;
   }
@@ -141,8 +148,8 @@ function isVariableAlias(value: unknown): value is VariableAlias {
 }
 
 /**
- * A colour defined as "alias + opacity". Undocumented in `@figma/plugin-typings` — confirmed
- * present at runtime by the Diagnostics tab (see `VariableExpressionValue`).
+ * A Figma variable expression — the 2026-09 carrier for "alias + opacity", and potentially for
+ * other expression functions Relay doesn't evaluate. See `VariableExpressionValue`.
  */
 function isVariableExpression(value: unknown): value is VariableExpressionValue {
   return (
@@ -154,7 +161,44 @@ function isVariableExpression(value: unknown): value is VariableExpressionValue 
   );
 }
 
+/** The 2026-11 carrier for "alias + opacity". See `ComposedColorValue`. */
+function isComposedColorValue(value: unknown): value is ComposedColorValue {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'color' in value &&
+    typeof (value as ComposedColorValue).opacity === 'number'
+  );
+}
+
 const COMPOSE_COLOR = 'COMPOSE_COLOR';
+
+/** "Alias + opacity", normalized away from whichever runtime shape delivered it. */
+interface ComposedColorArgs {
+  color: unknown;
+  opacity: unknown;
+}
+
+/**
+ * Figma has delivered composed colours in two different runtime shapes, neither of them in the
+ * published typings:
+ *
+ *   2026-09   { type: 'VARIABLE_EXPRESSION', expressionFunction: 'COMPOSE_COLOR',
+ *               expressionArguments: [color, opacity] }
+ *   2026-11   { color, opacity }
+ *
+ * Relay reads both, so neither a Figma rollout nor an older file breaks an export. Everything
+ * downstream works on the normalized pair — if Figma moves it a third time, this is the only
+ * function that changes. (The 2026-11 move went unnoticed until an export came back with 249
+ * raw API objects in place of colours; `describeProblem` is what now catches that.)
+ */
+function readComposedColor(value: unknown): ComposedColorArgs | null {
+  if (isComposedColorValue(value)) return { color: value.color, opacity: value.opacity };
+  if (isVariableExpression(value) && value.expressionFunction === COMPOSE_COLOR) {
+    return { color: value.expressionArguments[0], opacity: value.expressionArguments[1] };
+  }
+  return null;
+}
 
 /**
  * Figma stores the opacity of a composed colour on a 0–100 scale and the resulting alpha as a
@@ -225,16 +269,31 @@ function resolveValue(
     return resolveConcrete(target, pickTargetMode(target.collection, modeName), index, modeName, depth + 1);
   }
 
-  if (isVariableExpression(value)) {
-    if (value.expressionFunction !== COMPOSE_COLOR) return null;
+  const composed = readComposedColor(value);
+  if (composed) {
+    const base = resolveValue(composed.color as RuntimeVariableValue, index, modeName, depth + 1);
+    if (!isRgb(base) || typeof composed.opacity !== 'number') return null;
 
-    const base = resolveValue(value.expressionArguments[0] as RuntimeVariableValue, index, modeName, depth + 1);
-    const opacity = value.expressionArguments[1];
-    if (!isRgb(base) || typeof opacity !== 'number') return null;
-
-    return { r: base.r, g: base.g, b: base.b, a: opacityToAlpha(opacity) };
+    return { r: base.r, g: base.g, b: base.b, a: opacityToAlpha(composed.opacity) };
   }
 
+  if (isVariableExpression(value)) return null; // an expression function Relay can't evaluate
+
+  return value;
+}
+
+/**
+ * A resolved value as `$value`. An object that isn't a colour is *refused* rather than passed
+ * through: that pass-through is precisely how the 2026-11 export shipped raw `{color, opacity}`
+ * objects as colour values. The token is marked instead, so `describeProblem` reports it.
+ */
+function toTokenValue(value: RuntimeVariableValue | null, token: DesignToken): TokenValue {
+  if (value === null) return '';
+  if (isRgb(value)) return toColorValue(value);
+  if (typeof value === 'object') {
+    token.$extensions!['com.subliminal.unreadableValue'] = { raw: JSON.stringify(value) };
+    return '';
+  }
   return value;
 }
 
@@ -303,23 +362,15 @@ function buildToken(
   // Figma omits the key entirely for a variable with no scopes rather than writing `[]`.
   if (variable.scopes.length > 0) token.$extensions['com.figma.scopes'] = toNativeScopes(variable.scopes);
 
-  // Composition is checked before aliasing: a composed colour's first argument *is* an alias,
-  // but Figma emits the flattened value plus `composedColor` — never a `{Ref}` and never
-  // `aliasData`. Verified against native exports of both modes.
-  if (isVariableExpression(raw)) {
-    if (raw.expressionFunction !== COMPOSE_COLOR) {
-      token.$extensions!['com.subliminal.unsupportedExpression'] = {
-        expressionFunction: raw.expressionFunction,
-        raw: JSON.stringify(raw),
-      };
-      return token;
-    }
+  // Composition is checked before aliasing: a composed colour's base *is* an alias, but Figma
+  // emits the flattened value plus `composedColor` — never a `{Ref}` and never `aliasData`.
+  // Verified against native exports of both modes.
+  const composed = readComposedColor(raw);
+  if (composed) {
+    token.$value = toTokenValue(resolveValue(raw, index, modeName), token);
 
-    const resolved = resolveValue(raw, index, modeName);
-    if (isRgb(resolved)) token.$value = toColorValue(resolved);
-
-    const colorSource = raw.expressionArguments[0];
-    const opacity = raw.expressionArguments[1];
+    const colorSource = composed.color;
+    const opacity = composed.opacity;
 
     let colorArg: ComposedColor['colorArg'];
     if (isVariableAlias(colorSource)) {
@@ -350,6 +401,14 @@ function buildToken(
     return token;
   }
 
+  if (isVariableExpression(raw)) {
+    token.$extensions!['com.subliminal.unsupportedExpression'] = {
+      expressionFunction: raw.expressionFunction,
+      raw: JSON.stringify(raw),
+    };
+    return token;
+  }
+
   if (isVariableAlias(raw)) {
     const target = index.get(raw.id);
 
@@ -364,16 +423,51 @@ function buildToken(
       ? resolveConcrete(target, pickTargetMode(target.collection, modeName), index, modeName)
       : null;
 
-    token.$value = concrete === null
-      ? ''
-      : isRgb(concrete) ? toColorValue(concrete) : (concrete as string | number | boolean);
-
+    token.$value = toTokenValue(concrete, token);
     token.$extensions!['com.figma.aliasData'] = describeAlias(raw.id, target);
     return token;
   }
 
-  token.$value = isRgb(raw) ? toColorValue(raw) : (raw as string | number | boolean);
+  token.$value = toTokenValue(raw, token);
   return token;
+}
+
+/** Keep a raw dump short enough to read in the plugin panel. */
+function clip(text: string, max = 120): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Does `$value` actually match `$type`? This is the export's sanity check, run on every token —
+ * the one that would have caught the 2026-11 export, which carried 249 raw API objects in place
+ * of colours and looked complete. Returns null when the token is sound.
+ */
+function describeProblem(token: DesignToken): string | null {
+  const ext = token.$extensions || {};
+  const unreadable = ext['com.subliminal.unreadableValue'];
+  if (unreadable) return `unrecognised value shape — ${clip(unreadable.raw)}`;
+  const unsupported = ext['com.subliminal.unsupportedExpression'];
+  if (unsupported) return `unsupported expression ${unsupported.expressionFunction}`;
+
+  const value = token.$value;
+  // A same-collection `{Group.Name}` reference is valid for any type.
+  if (typeof value === 'string' && /^\{.+\}$/.test(value)) return null;
+
+  switch (token.$type) {
+    case 'color':
+      if (typeof value === 'object' && value !== null && 'colorSpace' in value) return null;
+      return value === ''
+        ? 'colour could not be resolved — broken or unreachable alias'
+        : `not a colour — ${clip(JSON.stringify(value))}`;
+    case 'number':
+      return typeof value === 'number' ? null : `not a number — ${clip(JSON.stringify(value))}`;
+    case 'boolean':
+      return typeof value === 'boolean' ? null : `not a boolean — ${clip(JSON.stringify(value))}`;
+    case 'string':
+      return typeof value === 'string' ? null : `not a string — ${clip(JSON.stringify(value))}`;
+    default:
+      return `unsupported variable type "${token.$type}"`;
+  }
 }
 
 function setNestedToken(target: TokenCollection, name: string, token: DesignToken): void {
@@ -399,11 +493,13 @@ async function extractAndSendTokens(): Promise<void> {
   const index = await buildVariableIndex(collections);
 
   const files: TokenFile[] = [];
+  const problems: ExportProblem[] = [];
 
   for (const collection of collections) {
     // One file per mode — the scaffold only ever read defaultModeId, which silently dropped
     // Darkmode and two of the three typography breakpoints.
     for (const mode of collection.modes) {
+      const fileName = `${collection.name}.${mode.name}.tokens.json`;
       const tokens: TokenCollection = {};
 
       for (const id of collection.variableIds) {
@@ -411,17 +507,16 @@ async function extractAndSendTokens(): Promise<void> {
         if (!record) continue;
 
         const token = buildToken(record, mode.modeId, mode.name, index);
-        if (token) setNestedToken(tokens, record.variable.name, token);
+        if (!token) continue;
+
+        setNestedToken(tokens, record.variable.name, token);
+        const reason = describeProblem(token);
+        if (reason) problems.push({ fileName, tokenPath: record.variable.name, reason });
       }
 
       tokens.$extensions = { 'com.figma.modeName': mode.name } as unknown as TokenCollection;
 
-      files.push({
-        collectionName: collection.name,
-        modeName: mode.name,
-        fileName: `${collection.name}.${mode.name}.tokens.json`,
-        tokens,
-      });
+      files.push({ collectionName: collection.name, modeName: mode.name, fileName, tokens });
     }
   }
 
@@ -435,6 +530,7 @@ async function extractAndSendTokens(): Promise<void> {
         modes: c.modes.map((m) => m.name),
         variableCount: c.variableIds.length,
       })),
+      problems,
     },
     files,
     effectStyles: await extractEffectStyles(),
@@ -518,23 +614,33 @@ async function runDiagnostic(): Promise<void> {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
   const index = await buildVariableIndex(collections);
 
-  // `expressionFunction`/`expressionArguments` are absent from the published typings but are now
-  // understood by Relay, so they count as known here — `undocumentedKeys` should mean
-  // "a shape nobody has looked at yet", which is the thing worth flagging.
+  // Both composed-colour shapes are absent from the published typings but are understood by
+  // Relay, so their keys count as known here — `undocumentedKeys` should mean "a shape nobody
+  // has looked at yet", which is the thing worth flagging.
   const documentedKeys = new Set([
-    'r', 'g', 'b', 'a', 'type', 'id', 'expressionFunction', 'expressionArguments',
+    'r', 'g', 'b', 'a', 'type', 'id', 'expressionFunction', 'expressionArguments', 'color', 'opacity',
   ]);
   const undocumented = new Set<string>();
   const shapeCounts: Record<string, number> = {};
   const probes: VariableProbe[] = [];
   const categoryCounts: Record<string, number> = {};
+  let composedCount = 0;
+
+  const COMPOSED_CURRENT = 'ComposedColor {color, opacity}';
+  const COMPOSED_LEGACY = `VariableExpression (${COMPOSE_COLOR})`;
+  const UNRECOGNISED = 'Unrecognised object';
 
   function classify(value: RuntimeVariableValue): string {
+    if (isComposedColorValue(value)) return COMPOSED_CURRENT;
     if (isVariableExpression(value)) return `VariableExpression (${value.expressionFunction})`;
     if (isVariableAlias(value)) return 'VariableAlias';
     if (isRgb(value)) {
       const alpha = 'a' in value ? (value as RGBA).a : 1;
       return alpha < 1 ? 'RGBA (alpha < 1)' : 'RGB/RGBA (opaque)';
+    }
+    // Name the keys: "object" is what this said in 2026-11, and it hid a format change.
+    if (typeof value === 'object' && value !== null) {
+      return `${UNRECOGNISED} {${Object.keys(value).sort().join(', ')}}`;
     }
     return typeof value;
   }
@@ -552,6 +658,7 @@ async function runDiagnostic(): Promise<void> {
         if (variable.resolvedType === 'COLOR') {
           const shape = classify(raw);
           shapeCounts[shape] = (shapeCounts[shape] || 0) + 1;
+          if (readComposedColor(raw)) composedCount++;
         }
 
         if (raw && typeof raw === 'object') {
@@ -566,17 +673,18 @@ async function runDiagnostic(): Promise<void> {
       // translucent RGBA would be the signature of a *flattened* alias+opacity, and aliases and
       // opaque values are sampled alongside both for contrast.
       if (variable.resolvedType === 'COLOR') {
-        const shapes = collection.modes
+        const values = collection.modes
           .map((mode) => variable.valuesByMode[mode.modeId] as RuntimeVariableValue | undefined)
-          .filter((raw) => raw !== undefined)
-          .map((raw) => classify(raw as RuntimeVariableValue));
+          .filter((raw): raw is RuntimeVariableValue => raw !== undefined);
+        const shapes = values.map(classify);
 
-        const isComposed = shapes.some((shape) => shape.indexOf('VariableExpression') === 0);
-        const category = isComposed
-          ? 'composed'
-          : shapes.indexOf('RGBA (alpha < 1)') !== -1
-            ? 'translucent'
-            : shapes.indexOf('VariableAlias') !== -1 ? 'alias' : 'opaque';
+        const category = shapes.some((shape) => shape.indexOf(UNRECOGNISED) === 0)
+          ? 'unrecognised'
+          : values.some((raw) => readComposedColor(raw) !== null)
+            ? 'composed'
+            : shapes.indexOf('RGBA (alpha < 1)') !== -1
+              ? 'translucent'
+              : shapes.indexOf('VariableAlias') !== -1 ? 'alias' : 'opaque';
 
         if ((categoryCounts[category] || 0) < PROBES_PER_CATEGORY) {
           categoryCounts[category] = (categoryCounts[category] || 0) + 1;
@@ -600,20 +708,20 @@ async function runDiagnostic(): Promise<void> {
     }
   }
 
-  const composedCount = Object.keys(shapeCounts)
-    .filter((shape) => shape.indexOf(`VariableExpression (${COMPOSE_COLOR})`) === 0)
-    .reduce((sum, shape) => sum + shapeCounts[shape], 0);
-
   const otherExpressions = Object.keys(shapeCounts).filter(
-    (shape) => shape.indexOf('VariableExpression') === 0 && shape.indexOf(COMPOSE_COLOR) === -1,
+    (shape) => shape.indexOf('VariableExpression') === 0 && shape !== COMPOSED_LEGACY,
   );
+  const unrecognised = Object.keys(shapeCounts).filter((shape) => shape.indexOf(UNRECOGNISED) === 0);
 
   let verdict: string;
   if (composedCount > 0) {
+    const forms = [COMPOSED_CURRENT, COMPOSED_LEGACY]
+      .filter((shape) => shapeCounts[shape])
+      .map((shape) => `${shapeCounts[shape]} as ${shape}`)
+      .join(', ');
     verdict =
-      `Settled: the Plugin API DOES expose alias+opacity. ${composedCount} colour value(s) come back as ` +
-      `VARIABLE_EXPRESSION / ${COMPOSE_COLOR}, carrying the base VARIABLE_ALIAS and the opacity (0–100). ` +
-      'Relay exports these as com.figma.composedColor, matching Figma\'s native export — no colour matching or name heuristics needed.';
+      `Composed colours readable: ${composedCount} alias+opacity value(s) (${forms}). ` +
+      'Relay exports these as com.figma.composedColor, matching Figma\'s native export.';
   } else if (Object.keys(shapeCounts).indexOf('RGBA (alpha < 1)') !== -1) {
     verdict =
       'No composed values, but translucent RGBA is present — the Plugin API has flattened alias+opacity ' +
@@ -622,6 +730,11 @@ async function runDiagnostic(): Promise<void> {
     verdict = 'No composed or translucent colour values found in this file.';
   }
 
+  if (unrecognised.length > 0) {
+    verdict +=
+      ` ⚠ Value shapes Relay does NOT recognise, which will export as empty: ${unrecognised.join('; ')}. ` +
+      'Figma has likely changed a format — readComposedColor in code.ts is the usual place to fix it.';
+  }
   if (otherExpressions.length > 0) {
     verdict += ` Also present, and NOT yet supported by Relay: ${otherExpressions.join(', ')}.`;
   }
