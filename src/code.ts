@@ -18,13 +18,14 @@ import {
   SubliminalTokenExport,
   TokenCollection,
   TokenFile,
+  TextStyleVariableRef,
   TokenValue,
   UIToPluginMessage,
   VariableExpressionValue,
   VariableProbe,
 } from './types';
 
-const PLUGIN_VERSION = '0.5.0';
+const PLUGIN_VERSION = '0.6.0';
 
 /** How many of each discovered category the diagnostic dumps in full. */
 const PROBES_PER_CATEGORY = 4;
@@ -534,6 +535,7 @@ async function extractAndSendTokens(): Promise<void> {
     },
     files,
     effectStyles: await extractEffectStyles(),
+    textStyles: await extractTextStyles(),
   };
 
   figma.ui.postMessage({ type: 'TOKENS_EXTRACTED', payload });
@@ -592,6 +594,82 @@ async function extractEffectStyles(): Promise<TokenCollection> {
     const token = {
       $type: 'effect',
       $value: { css, cssRaw, emotion: css, $effects: style.effects },
+    } as unknown as DesignToken;
+    if (style.description) token.$description = style.description;
+
+    setNestedToken(result, style.name, token);
+  }
+
+  return result;
+}
+
+// ─── Text styles ─────────────────────────────────────────────────────────────
+
+/** The text-style fields Figma lets a variable drive. */
+const TEXT_STYLE_BINDABLE = [
+  'fontFamily',
+  'fontStyle',
+  'fontSize',
+  'fontWeight',
+  'lineHeight',
+  'letterSpacing',
+  'paragraphSpacing',
+  'paragraphIndent',
+] as const;
+
+/**
+ * Text styles export what each one *is* and, more importantly, which variable drives each field.
+ * SDS builds its type classes from those bindings, so a style hooked to a different variable in
+ * Figma changes the code with no other edit. A style field with no variable is simply absent from
+ * `com.subliminal.boundVariables`, which the build treats as an error for the fields a type style
+ * needs.
+ *
+ * Variables are named by collection and path, not id: ids mean nothing outside this file.
+ */
+async function extractTextStyles(): Promise<TokenCollection> {
+  const styles = await figma.getLocalTextStylesAsync();
+  const result: TokenCollection = {};
+  const resolved = new Map<string, TextStyleVariableRef | null>();
+
+  const resolve = async (alias: VariableAlias): Promise<TextStyleVariableRef | null> => {
+    if (!resolved.has(alias.id)) {
+      const variable = await figma.variables.getVariableByIdAsync(alias.id);
+      const collection = variable
+        ? await figma.variables.getVariableCollectionByIdAsync(variable.variableCollectionId)
+        : null;
+      resolved.set(alias.id, variable ? { collection: collection ? collection.name : '', name: variable.name } : null);
+    }
+    return resolved.get(alias.id) ?? null;
+  };
+
+  for (const style of styles) {
+    const bound: Record<string, TextStyleVariableRef> = {};
+    const bindings = (style.boundVariables ?? {}) as Record<string, VariableAlias | undefined>;
+    for (const field of TEXT_STYLE_BINDABLE) {
+      const alias = bindings[field];
+      if (!alias) continue;
+      const ref = await resolve(alias);
+      if (ref) bound[field] = ref;
+    }
+
+    const { lineHeight, letterSpacing } = style;
+    const token = {
+      $type: 'typography',
+      $value: {
+        fontFamily: style.fontName.family,
+        fontStyle: style.fontName.style,
+        fontSize: style.fontSize,
+        lineHeight: lineHeight.unit === 'AUTO' ? { unit: 'AUTO' } : { unit: lineHeight.unit, value: lineHeight.value },
+        letterSpacing: { unit: letterSpacing.unit, value: letterSpacing.value },
+        textCase: style.textCase,
+        textDecoration: style.textDecoration,
+        paragraphSpacing: style.paragraphSpacing,
+        paragraphIndent: style.paragraphIndent,
+      },
+      $extensions: {
+        'com.figma.styleId': style.id,
+        'com.subliminal.boundVariables': bound,
+      },
     } as unknown as DesignToken;
     if (style.description) token.$description = style.description;
 

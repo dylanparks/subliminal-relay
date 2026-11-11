@@ -10,6 +10,7 @@ Allows designers to extract their customized Figma variables and styles (colors,
 
 - **GitHub Export** — Authenticate with a GitHub Personal Access Token and push your token JSON to any repo, branch, and file path of your choosing. Creates or updates the file with a timestamped commit.
 - **Manual Export** — Extract tokens and download the JSON file or copy it to your clipboard, no GitHub connection needed.
+- **Text styles** — Each text style is exported with the variable bound to each of its fields (`text-styles.json` in the .zip), so the design system's type classes can be built from Figma's own definitions.
 - **Structured output** — Variables are exported following the [W3C Design Token format](https://design-tokens.github.io/community-group/format-spec/), nested by group path.
 
 ---

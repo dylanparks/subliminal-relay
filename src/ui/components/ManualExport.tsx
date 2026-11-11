@@ -32,6 +32,7 @@ function buildZip(tokens: SubliminalTokenExport): Blob {
   const entries: Record<string, Uint8Array> = {};
   for (const file of tokens.files) entries[file.fileName] = strToU8(json(file.tokens));
   entries['effect-styles.json'] = strToU8(json(tokens.effectStyles));
+  entries['text-styles.json'] = strToU8(json(tokens.textStyles));
 
   const zip = zipSync(entries, { level: 6 });
   // Copy into a plain ArrayBuffer: TS's DOM typings reject a Uint8Array that might be backed by
@@ -91,6 +92,9 @@ export function ManualExport({ tokens, loading, onExtract }: Props) {
                 </li>
               ))}
             </ul>
+            <p className="panel-description">
+              The .zip also holds effect-styles.json and text-styles.json.
+            </p>
           </div>
 
           <div className="action-row">

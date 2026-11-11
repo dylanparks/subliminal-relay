@@ -140,6 +140,17 @@ export interface SubliminalTokenExport {
   files: TokenFile[];
   /** Effect styles carry real CSS, not just their names — SDS consumes `css.boxShadow`. */
   effectStyles: TokenCollection;
+  /**
+   * Text styles, each with the variable bound to each of its fields
+   * (`$extensions['com.subliminal.boundVariables']`). SDS builds its type classes from these.
+   */
+  textStyles: TokenCollection;
+}
+
+/** A variable named by collection and path (ids mean nothing outside the Figma file). */
+export interface TextStyleVariableRef {
+  collection: string;
+  name: string;
 }
 
 // ─── Diagnostic ─────────────────────────────────────────────────────────────

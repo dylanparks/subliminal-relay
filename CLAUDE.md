@@ -13,9 +13,11 @@ turns that JSON into `tokens.css` / `tokens.ts` via Style Dictionary.
 So Relay is one half of a pipeline: **Figma variables → Relay export → SDS token build → CSS
 custom properties consumed by ~39 React components.**
 
-## Current state (2026-11-08)
+## Current state (2026-11-11)
 
-Working branch: **`claude/brand-alpha-export`**. Version `0.5.0`.
+`main` holds everything through 0.5.0 (merged 2026-11-11). Text-style export is **0.6.0**, on
+`claude/relay-text-styles`. The old March branch `figma-plugin-foundation` is superseded and unmerged
+(it dropped GitHub export; neither branch has a real plugin id in `manifest.json`).
 
 **Figma changed the composed-colour runtime format in 2026-11** (see "Two runtime shapes" below).
 Every Relay ≤ 0.4.1 export of a current file silently ships 249 raw API objects in place of
@@ -47,6 +49,22 @@ plugin id).
 collections came through with every mode — Global Values ×1, Intent Colors ×2, Shape and Space ×2
 (`Subliminal Brand` / `Example Brand`), Responsive Typography ×3 — 336 / 193 / 14 / 65 variables
 respectively, no empty `$value`, no unsupported expressions.
+
+## Text styles (0.6.0)
+
+`text-styles.json` (in "Download All (.zip)") holds one `typography` token per Figma text style:
+its values (`fontFamily`, `fontStyle`, `fontSize`, `lineHeight`, `letterSpacing`, …) plus
+`$extensions['com.subliminal.boundVariables']`, which names the variable bound to each field by
+`{ collection, name }` (never by id). SDS's `build-scale-layer.mjs` builds the `.sds-text--*` classes
+from those bindings and fails the build if a style has an unbound field, no matching Font size
+variable, or a variable that isn't in the export. Without the file it infers the classes from the
+Breakpoint › Font size names, as before.
+
+**Verified:** `extractTextStyles` was run against the live Figma file (through the Figma MCP's
+`use_figma`, which has the same Plugin API): 18 styles, all five fields bound, names resolved to
+`Brand` / `Breakpoint` collections. The committed `text-styles.json` in SDS's `relay-export/` was
+produced that way, not by the plugin UI, and is superseded by the next real export. What is *not*
+verified: the zip entry and the plugin UI run inside Figma (typecheck and bundle build only).
 
 ## ⚠️ This scaffold was never actually working — verify, don't assume
 
@@ -262,5 +280,4 @@ two runs. So a clean harness run is strong evidence, not just a self-consistency
 
 - `GitHubExport` pushes the whole payload as a single JSON blob. It should push the separate
   per-collection files, which needs the GitHub tree API.
-- Text styles are still exported as `$value: style.name`. Effect styles were fixed to emit real
-  `boxShadow`/`filter` CSS; text styles weren't, because nothing downstream consumes them yet.
+- `meta.collections` doesn't list text or effect styles, and `meta.problems` doesn't check them.
