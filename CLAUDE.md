@@ -66,6 +66,14 @@ Breakpoint › Font size names, as before.
 produced that way, not by the plugin UI, and is superseded by the next real export. What is *not*
 verified: the zip entry and the plugin UI run inside Figma (typecheck and bundle build only).
 
+## Security notes
+
+- **The GitHub token is never persisted** (since 0.6.0). It was saved in plain text in the plugin's
+  `localStorage`; it now lives in React state, and an old saved token is erased on load. Owner, repo,
+  branch and path are still remembered. Recommend a fine-grained token on one repository with
+  Contents read/write.
+- `manifest.json`'s `networkAccess` allows only `https://api.github.com`. Keep it that narrow.
+
 ## ⚠️ This scaffold was never actually working — verify, don't assume
 
 The repo sat at a single "initial scaffold" commit for months. Three separate things were written

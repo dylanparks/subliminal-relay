@@ -11,9 +11,19 @@ interface Props {
 
 const STORAGE_KEY = 'subliminal-relay-gh-config';
 
-function loadSavedConfig(): Partial<GitHubConfig> {
+/**
+ * Everything except the token. A Personal Access Token is a credential: persisting it left it in
+ * plain text on disk, readable by anything that can read the plugin's storage. It now lives in
+ * memory for the session, and any token an earlier version saved is erased on load.
+ */
+function loadSavedConfig(): Partial<Omit<GitHubConfig, 'token'>> {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    if ('token' in stored) {
+      delete stored.token;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+    }
+    return stored;
   } catch {
     return {};
   }
@@ -23,7 +33,7 @@ export function GitHubExport({ tokens, loading, onExtract }: Props) {
   const saved = loadSavedConfig();
 
   const [config, setConfig] = useState<GitHubConfig>({
-    token: saved.token || '',
+    token: '',
     owner: saved.owner || '',
     repo: saved.repo || '',
     branch: saved.branch || 'main',
@@ -38,7 +48,8 @@ export function GitHubExport({ tokens, loading, onExtract }: Props) {
   };
 
   const saveConfig = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    const { token: _token, ...persistable } = config;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
   };
 
   const handlePush = async () => {
@@ -67,8 +78,9 @@ export function GitHubExport({ tokens, loading, onExtract }: Props) {
     <div className="panel">
       <p className="panel-description">
         Connect to a GitHub repository and push your Subliminal design tokens as a JSON file.
-        Your Personal Access Token is stored locally in your browser and never sent to any server
-        other than the GitHub API.
+        Your Personal Access Token is kept in memory only: it is never saved, so you'll paste it
+        again next time, and it is only ever sent to the GitHub API. Use a fine-grained token limited
+        to this one repository with "Contents: read and write".
       </p>
 
       <div className="form">
